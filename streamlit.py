@@ -1,125 +1,101 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
 
-# 1. 페이지 설정 (와이드 모드)
-st.set_page_config(page_title="Global Top 10 Dashboard", layout="wide")
-
-st.title("🌐 글로벌 시가총액 Top 10 주식 대시보드")
-st.caption("실시간 주가 정보와 최근 트렌드를 한눈에 확인하세요.")
+# 1. 페이지 설정
+st.set_page_config(page_title="서울시 공영주차장 안내", layout="wide")
+st.title("🚗 서울시 공영주차장 안내 대시보드")
 st.markdown("---")
 
-# 2. 글로벌 시총 Top 10 기업 정보 (티커 및 한글명)
-top_10_companies = {
-    "NVDA": "엔비디아 (NVIDIA)",
-    "AAPL": "애플 (Apple)",
-    "GOOGL": "알파벳 (Alphabet)",
-    "MSFT": "마이크로소프트 (Microsoft)",
-    "AMZN": "아마존 (Amazon)",
-    "TSM": "TSMC",
-    "AVGO": "브로드컴 (Broadcom)",
-    "META": "메타 (Meta Platforms)",
-    "TSLA": "테슬라 (Tesla)",
-    "BRK-B": "버크셔 해서웨이 (Berkshire Hathaway)"
-}
+# 2. 데이터 불러오기 함수
+@st.cache_data
+def load_data():
+    # 인코딩 오류 방지를 위해 cp949 또는 utf-8-sig 사용
+    df = pd.read_csv("서울시 공영주차장 안내 정보.csv", encoding="utf-8")
+    
+    # 위도, 경도 컬럼명을 Streamlit 지도 인식용(latitude, longitude)으로 변경
+    df = df.rename(columns={'위도': 'latitude', '경도': 'longitude'})
+    
+    # 위도/경도 결측치 제거 및 숫자형 변환
+    df = df.dropna(subset=['latitude', 'longitude'])
+    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+    
+    # 주소에서 '구' 정보 추출 (예: 성동구, 강북구)
+    df['자치구'] = df['주소'].apply(lambda x: x.split()[0] if isinstance(x, str) else "미분류")
+    
+    return df
 
-# 3. 사이드바 구성 (주식 선택 및 기간 설정)
-st.sidebar.header("⚙️ 대시보드 설정")
-selected_ticker = st.sidebar.selectbox(
-    "조회할 기업을 선택하세요", 
-    options=list(top_10_companies.keys()),
-    format_func=lambda x: f"{top_10_companies[x]} ({x})"
-)
-
-period_options = {"1개월": "1mo", "3개월": "3mo", "6개월": "6mo", "1년": "1y", "올해 누적(YTD)": "ytd"}
-selected_period = st.sidebar.radio("차트 기간 선택", list(period_options.keys()))
-
-# 4. 데이터 로드 함수 (캐싱 적용으로 속도 향상)
-@st.cache_data(ttl=600)
-def get_stock_data(ticker, period):
-    stock = yf.Ticker(ticker)
-    # 주가 히스토리 데이터
-    df = stock.history(period=period_options[period])
-    # 기업 기본 정보
-    info = stock.info
-    return df, info
-
-# 데이터 가져오기
-with st.spinner('데이터를 불러오는 중입니다...'):
-    try:
-        df, info = get_stock_data(selected_ticker, selected_period)
+try:
+    df = load_data()
+    
+    # 3. 사이드바 필터 설정
+    st.sidebar.header("🔍 주차장 필터링")
+    
+    # 자치구 선택 (전체 또는 특정 구)
+    gu_list = ["전체"] + sorted(list(df['자치구'].unique()))
+    selected_gu = st.sidebar.selectbox("자치구를 선택하세요", gu_list)
+    
+    # 유무료 구분 필터
+    pay_list = ["전체"] + list(df['유무료구분명'].unique())
+    selected_pay = st.sidebar.selectbox("유/무료 구분", pay_list)
+    
+    # 데이터 필터링 적용
+    filtered_df = df.copy()
+    if selected_gu != "전체":
+        filtered_df = filtered_df[filtered_df['자치구'] == selected_gu]
+    if selected_pay != "전체":
+        filtered_df = filtered_df[filtered_df['유무료구분명'] == selected_pay]
         
-        # 5. 메인 대시보드 화면 상단 지표 (Metrics)
-        current_price = info.get('currentPrice', df['Close'].iloc[-1])
-        prev_close = info.get('previousClose', df['Close'].iloc[-2])
-        price_change = current_price - prev_close
-        price_change_pct = (price_change / prev_close) * 100
+    # 4. 상단 요약 지표 (Metrics)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("검색된 주차장 수", f"{len(filtered_df)} 개")
+    with col2:
+        total_slots = filtered_df['총 주차면'].sum()
+        st.metric("총 주차 가능 면수", f"{int(total_slots):,} 면")
+    with col3:
+        free_count = len(filtered_df[filtered_df['유무료구분명'] == '무료'])
+        st.metric("무료 주차장 수", f"{free_count} 개")
         
-        market_cap_trillion = info.get('marketCap', 0) / 1e12 # 조 달러 단위
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric(
-                label="현재가 (USD)", 
-                value=f"${current_price:,.2f}", 
-                delta=f"${price_change:,.2f} ({price_change_pct:+.2f}%)"
+    st.markdown("---")
+    
+    # 5. 지도 시각화 및 상세 정보 분할 배치
+    map_col, info_col = st.columns([2, 1])
+    
+    with map_col:
+        st.subheader("📍 주차장 위치 지도")
+        if not filtered_df.empty:
+            # Streamlit 내장 지도 레이어 사용
+            st.map(filtered_df[['latitude', 'longitude']])
+        else:
+            st.warning("조건에 맞는 주차장이 없습니다.")
+            
+    with info_col:
+        st.subheader("📋 주차장 선택 상세 정보")
+        if not filtered_df.empty:
+            selected_parking = st.selectbox(
+                "상세 정보를 볼 주차장을 선택하세요", 
+                options=filtered_df['주차장명'].unique()
             )
-        with col2:
-            st.metric(label="시가총액", value=f"${market_cap_trillion:,.2f} T (조 달러)")
-        with col3:
-            st.metric(label="52주 최고가", value=f"${info.get('52WeekHigh', 0):,.2f}")
-        with col4:
-            st.metric(label="52주 최저가", value=f"${info.get('52WeekLow', 0):,.2f}")
             
-        st.markdown("---")
-        
-        # 6. 좌측 차트 / 우측 기업 요약 배치 (Layout 분할)
-        chart_col, info_col = st.columns([2, 1])
-        
-        with chart_col:
-            st.subheader(f"📈 {top_10_companies[selected_ticker]} 주가 추이 ({selected_period})")
+            p_info = filtered_df[filtered_df['주차장명'] == selected_parking].iloc[0]
             
-            # Plotly를 이용한 깔끔한 캔들스틱/라인 차트 선택 가능
-            chart_type = st.segmented_control("차트 종류", ["라인", "캔들스틱"], default="라인")
-            
-            fig = go.Figure()
-            if chart_type == "라인":
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name='종가', line=dict(color='#1f77b4', width=2)))
-            else:
-                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='주가'))
-                
-            fig.update_layout(
-                margin=dict(l=20, r=20, t=20, b=20),
-                height=450,
-                xaxis_rangeslider_visible=False,
-                template="plotly_white"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-        with info_col:
-            st.subheader("🏢 기업 주요 요약")
-            st.write(f"**섹터:** {info.get('sector', 'N/A')}")
-            st.write(f"**산업군:** {info.get('industry', 'N/A')}")
-            st.write(f"**PER (선행):** {info.get('forwardPE', 'N/A')}")
-            st.write(f"**배당수익률:** {info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else "**배당수익률:** N/A")
-            
-            with st.expander("📝 기업 설명 보기"):
-                st.caption(info.get('longBusinessSummary', '설명이 존재하지 않습니다.'))
-                
-        # 7. 하단 전체 순위표 제공
-        st.markdown("---")
-        st.subheader("🏆 글로벌 시총 상위 10개 기업 요약 테이블")
-        
-        # 미리 정의된 정적 데이터 또는 간략한 목록 표기
-        summary_data = []
-        for ticker, name in top_10_companies.items():
-            summary_data.append({"티커": ticker, "기업명": name})
-        
-        st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
-        
-    except Exception as e:
-        st.error(
-            f"데이터를 가져오는 중 오류가 발생했습니다. Yahoo Finance API 제한이거나 티커 문제일 수 있습니다. (에러: {e})"
-        )
+            st.write(f"🏠 **주소:** {p_info['주소']}")
+            st.write(f"📞 **전화번호:** {p_info['전화번호']}")
+            st.write(f"🎫 **유무료:** {p_info['유무료구분명']}")
+            st.write(f"⏱️ **평일 운영시간:** {p_info['평일 운영 시작시각(HHMM)']} ~ {p_info['평일 운영 종료시각(HHMM)']}")
+            st.write(f"💰 **기본 요금:** {p_info['기본 주차 요금']}원 ({p_info['기본 주차 시간(분 단위)']}분 기준)")
+            st.write(f"➕ **추가 요금:** {p_info['추가 단위 요금']}원 (내릴 때마다 {p_info['추가 단위 시간(분 단위)']}분당)")
+        else:
+            st.write("데이터가 없습니다.")
+
+    # 6. 하단 데이터 테이블 표기
+    st.markdown("---")
+    st.subheader("📊 주차장 원본 데이터 (필터링됨)")
+    show_cols = ['주차장명', '주소', '주차장 종류명', '총 주차면', '유무료구분명', '기본 주차 요금', '일 최대 요금']
+    st.dataframe(filtered_df[show_cols], use_container_width=True, hide_index=True)
+
+except FileNotFoundError:
+    st.error("파일을 찾을 수 없습니다. 파이썬 파일과 '서울시 공영주차장 안내 정보.csv' 파일이 같은 폴더에 있는지 확인해 주세요.")
+except Exception as e:
+    st.error(f"오류가 발생했습니다: {e}")
