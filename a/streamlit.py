@@ -1,39 +1,35 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import os
 
 # 1. 페이지 설정
 st.set_page_config(page_title="서울시 공영주차장 안내", layout="wide")
 st.title("🚗 서울시 공영주차장 안내 대시보드")
+st.caption("지도를 확대/축소하면 주차장 마커 크기도 화면에 맞게 조절됩니다.")
 st.markdown("---")
 
-# 2. 데이터 불러오기 함수 (경로 탐색 보완 버전)
+# 2. 데이터 불러오기 함수
 @st.cache_data
 def load_data():
-    # 현재 실행 중인 파이썬 파일(app.py)의 절대 경로 폴더 확인
     current_dir = os.path.dirname(os.path.abspath(__file__))
     file_name = "서울시 공영주차장 안내 정보.csv"
     file_path = os.path.join(current_dir, file_name)
     
-    # 만약 사용자가 실수로 파일명을 '서울시 공영주차장 안내 정보.csv.csv'로 저장했을 경우 대비
     if not os.path.exists(file_path):
         alternative_name = "서울시 공영주차장 안내 정보"
         alternative_path = os.path.join(current_dir, alternative_name)
         if os.path.exists(alternative_path):
             file_path = alternative_path
             
-    # 인코딩 오류 방지를 위해 utf-8 또는 cp949 적용
     df = pd.read_csv(file_path, encoding="utf-8")
     
-    # 위도, 경도 컬럼명을 Streamlit 지도 인식용(latitude, longitude)으로 변경
-    df = df.rename(columns={'위도': 'latitude', '경도': 'longitude'})
-    
     # 위도/경도 결측치 제거 및 숫자형 변환
-    df = df.dropna(subset=['latitude', 'longitude'])
-    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+    df = df.dropna(subset=['위도', '경도'])
+    df['위도'] = pd.to_numeric(df['위도'], errors='coerce')
+    df['경도'] = pd.to_numeric(df['경도'], errors='coerce')
     
-    # 주소에서 '구' 정보 추출
+    # 자치구 정보 추출
     df['자치구'] = df['주소'].apply(lambda x: x.split()[0] if isinstance(x, str) else "미분류")
     
     return df
@@ -44,11 +40,9 @@ try:
     # 3. 사이드바 필터 설정
     st.sidebar.header("🔍 주차장 필터링")
     
-    # 자치구 선택 (전체 또는 특정 구)
     gu_list = ["전체"] + sorted(list(df['자치구'].unique()))
     selected_gu = st.sidebar.selectbox("자치구를 선택하세요", gu_list)
     
-    # 유무료 구분 필터
     pay_list = ["전체"] + list(df['유무료구분명'].unique())
     selected_pay = st.sidebar.selectbox("유/무료 구분", pay_list)
     
@@ -76,9 +70,28 @@ try:
     map_col, info_col = st.columns([2, 1])
     
     with map_col:
-        st.subheader("📍 주차장 위치 지도")
+        st.subheader("📍 주차장 위치 지도 (인터랙티브)")
         if not filtered_df.empty:
-            st.map(filtered_df[['latitude', 'longitude']])
+            # 💡 Plotly를 활용해 화면 확대/축소에 따라 유연하게 반응하는 마크 구현
+            fig = px.scatter_mapbox(
+                filtered_df,
+                lat="위도",
+                lon="경도",
+                hover_name="주차장명",
+                hover_data={"주소": True, "유무료구분명": True, "위도": False, "경도": False},
+                zoom=11,
+                height=500
+            )
+            
+            # 스타일 설정 및 마커 크기 고정 방식 해제 (화면에 맞게 크기 동적 조절 가능)
+            fig.update_traces(marker=dict(size=12, opacity=0.8, color="#FF4B4B"))
+            fig.update_layout(
+                mapbox_style="open-street-map", # 별도의 토큰이 필요 없는 무료 오픈 스트리트 맵 사용
+                margin={"r":0,"t":0,"l":0,"b":0}
+            )
+            
+            # Streamlit에 차트 표시
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("조건에 맞는 주차장이 없습니다.")
             
@@ -106,8 +119,7 @@ try:
     st.dataframe(filtered_df[show_cols], use_container_width=True, hide_index=True)
 
 except FileNotFoundError:
-    # 현재 탐색을 시도한 경로를 화면에 출력해서 디버깅을 돕습니다.
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    st.error(f"❌ 파일을 찾을 수 없습니다! 현재 파이썬 파일 위치는 [{current_dir}] 입니다. 이 폴더 안에 CSV 파일이 들어있는지 꼭 확인해 주세요.")
+    st.error(f"❌ 파일을 찾을 수 없습니다! 현재 위치: [{current_dir}]")
 except Exception as e:
     st.error(f"오류가 발생했습니다: {e}")
