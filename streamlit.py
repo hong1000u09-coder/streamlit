@@ -7,7 +7,7 @@ st.title("📊 나의 첫 Streamlit 대시보드")
 
 # 사이드바에 입력창 만들기
 st.sidebar.header("설정 변경")
-data_points = st.sidebar.slider("데이터 개수 선택", min_value=10, max_value=10000, value=100)
+data_points = st.sidebar.slider("데이터 개수 선택", min_value=10, max_value=1000, value=100)
 
 # 메인 화면 설명
 st.write(f"현재 **{data_points}개**의 무작위 데이터를 시각화하고 있습니다.")
