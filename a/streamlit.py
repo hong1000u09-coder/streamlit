@@ -6,7 +6,6 @@ import os
 # 1. 페이지 설정
 st.set_page_config(page_title="서울시 공영주차장 안내", layout="wide")
 st.title("🚗 서울시 공영주차장 안내 대시보드")
-st.caption("지도를 확대/축소하면 주차장 마커 크기도 화면에 맞게 조절됩니다.")
 st.markdown("---")
 
 # 2. 데이터 불러오기 함수
