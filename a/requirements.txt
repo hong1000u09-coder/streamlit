@@ -1,4 +1,5 @@
 streamlit
-yfinance
+google-api-python-client
 pandas
-plotly
+wordcloud
+matplotlib
