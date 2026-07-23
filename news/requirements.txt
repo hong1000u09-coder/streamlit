@@ -1,0 +1,7 @@
+streamlit
+openai
+newspaper4k
+lxml_html_clean
+plotly
+wordcloud
+matplotlib
